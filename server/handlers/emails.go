@@ -21,6 +21,20 @@ import (
 
 // ponytail: GetAttachment removed — resend-go/v2 v2.28.0 has no Receiving.Attachments.Get API. Add when the SDK supports it.
 
+func requireMailboxAccess(c *gin.Context, mailboxID string) bool {
+	userID, _ := c.Get("userId")
+	umCol := database.GetCollection("usermailboxes")
+	count, err := umCol.CountDocuments(c.Request.Context(), bson.M{
+		"userId":    MustObjectID(userID.(string)),
+		"mailboxId": MustObjectID(mailboxID),
+	})
+	if err != nil || count == 0 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return false
+	}
+	return true
+}
+
 func ListEmails(c *gin.Context) {
 	mailboxID := c.Query("mailboxId")
 	direction := c.Query("direction")
@@ -34,6 +48,10 @@ func ListEmails(c *gin.Context) {
 	}
 	if limit < 1 || limit > 100 {
 		limit = 20
+	}
+
+	if !requireMailboxAccess(c, mailboxID) {
+		return
 	}
 
 	filter := bson.M{"mailboxId": MustObjectID(mailboxID)}
@@ -69,7 +87,10 @@ func ListEmails(c *gin.Context) {
 	defer cursor.Close(c.Request.Context())
 
 	var emails []models.Email
-	cursor.All(c.Request.Context(), &emails)
+	if err := cursor.All(c.Request.Context(), &emails); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse emails"})
+		return
+	}
 
 	var result []gin.H
 	for _, e := range emails {
@@ -99,6 +120,10 @@ func GetThread(c *gin.Context) {
 		return
 	}
 
+	if !requireMailboxAccess(c, email.MailboxID.Hex()) {
+		return
+	}
+
 	cursor, err := col.Find(
 		c.Request.Context(),
 		bson.M{"threadId": email.ThreadID},
@@ -111,7 +136,10 @@ func GetThread(c *gin.Context) {
 	defer cursor.Close(c.Request.Context())
 
 	var emails []models.Email
-	cursor.All(c.Request.Context(), &emails)
+	if err := cursor.All(c.Request.Context(), &emails); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse thread"})
+		return
+	}
 
 	var result []gin.H
 	for _, e := range emails {
@@ -138,6 +166,10 @@ func ToggleStar(c *gin.Context) {
 	err := col.FindOne(c.Request.Context(), bson.M{"_id": MustObjectID(c.Param("id"))}).Decode(&email)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "email not found"})
+		return
+	}
+
+	if !requireMailboxAccess(c, email.MailboxID.Hex()) {
 		return
 	}
 
@@ -173,6 +205,10 @@ func SendEmail(c *gin.Context) {
 	err := mbCol.FindOne(c.Request.Context(), bson.M{"_id": MustObjectID(req.MailboxID)}).Decode(&mailbox)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "mailbox not found"})
+		return
+	}
+
+	if !requireMailboxAccess(c, req.MailboxID) {
 		return
 	}
 

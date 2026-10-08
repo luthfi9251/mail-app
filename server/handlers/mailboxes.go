@@ -46,6 +46,10 @@ func ListMailboxes(c *gin.Context) {
 }
 
 func GetMailbox(c *gin.Context) {
+	if !requireMailboxAccess(c, c.Param("id")) {
+		return
+	}
+
 	mbCol := database.GetCollection("mailboxes")
 	var mb models.Mailbox
 	err := mbCol.FindOne(c.Request.Context(), bson.M{"_id": MustObjectID(c.Param("id"))}).Decode(&mb)

@@ -23,7 +23,10 @@ func ListUsers(c *gin.Context) {
 	defer cursor.Close(c.Request.Context())
 
 	var users []models.User
-	cursor.All(c.Request.Context(), &users)
+	if err := cursor.All(c.Request.Context(), &users); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse users"})
+		return
+	}
 
 	umCol := database.GetCollection("usermailboxes")
 	var result []gin.H
@@ -58,10 +61,14 @@ func CreateUser(c *gin.Context) {
 		req.Role = "user"
 	}
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
 
 	col := database.GetCollection("users")
-	_, err := col.InsertOne(c.Request.Context(), models.User{
+	_, err = col.InsertOne(c.Request.Context(), models.User{
 		Email:     req.Email,
 		Name:      req.Name,
 		Password:  string(hash),
@@ -114,7 +121,10 @@ func ListAllMailboxes(c *gin.Context) {
 	defer cursor.Close(c.Request.Context())
 
 	var mailboxes []models.Mailbox
-	cursor.All(c.Request.Context(), &mailboxes)
+	if err := cursor.All(c.Request.Context(), &mailboxes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse mailboxes"})
+		return
+	}
 
 	umCol := database.GetCollection("usermailboxes")
 	var result []gin.H
