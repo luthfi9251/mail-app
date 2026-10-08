@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { api, type EmailItem, type PaginatedResponse } from "../lib/api";
 import EmailCard from "./email-card";
