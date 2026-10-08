@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -29,6 +30,22 @@ func main() {
 			return
 		}
 		c.Next()
+	})
+
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.Next()
+			return
+		}
+		staticPath := "../react-spa/dist"
+		filePath := staticPath + c.Request.URL.Path
+		if _, err := os.Stat(filePath); err == nil {
+			c.File(filePath)
+			c.Abort()
+			return
+		}
+		c.File(staticPath + "/index.html")
+		c.Abort()
 	})
 
 	api := r.Group("/api")
