@@ -72,7 +72,7 @@ export default function ThreadView({
                 <div className="flex items-start gap-3">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback>
-                      {(email.direction === "outbound" ? email.from : email.from).charAt(0).toUpperCase()}
+                      {email.from.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
