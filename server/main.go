@@ -37,7 +37,7 @@ func main() {
 			c.Next()
 			return
 		}
-		staticPath := "../react-spa/dist"
+		staticPath := "../web/dist"
 		filePath := staticPath + c.Request.URL.Path
 		if _, err := os.Stat(filePath); err == nil {
 			c.File(filePath)
