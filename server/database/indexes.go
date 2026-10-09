@@ -34,10 +34,14 @@ func CreateIndexes() {
 	}
 
 	emailCol := GetCollection("emails")
+	// messageId used to be unique across all mailboxes, which let one mailbox's
+	// message block another's copy of the same email. It is now unique per mailbox.
+	_ = emailCol.Indexes().DropOne(context.Background(), "messageId_1")
 	_, err = emailCol.Indexes().CreateMany(context.Background(), []mongo.IndexModel{
 		{Keys: bson.D{{Key: "mailboxId", Value: 1}, {Key: "createdAt", Value: -1}}},
 		{Keys: bson.D{{Key: "mailboxId", Value: 1}, {Key: "direction", Value: 1}, {Key: "createdAt", Value: -1}}},
-		{Keys: bson.D{{Key: "messageId", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "mailboxId", Value: 1}, {Key: "messageId", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "mailboxId", Value: 1}, {Key: "threadId", Value: 1}, {Key: "createdAt", Value: 1}}},
 		{Keys: bson.D{{Key: "resendId", Value: 1}}, Options: options.Index().SetUnique(true).
 			SetPartialFilterExpression(bson.M{"resendId": bson.M{"$type": "string"}})},
 	})

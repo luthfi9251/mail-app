@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -61,6 +62,9 @@ func ListEmails(c *gin.Context) {
 	}
 	if starred == "true" {
 		filter["starred"] = true
+	}
+	if len(search) > 100 {
+		search = search[:100]
 	}
 	if search != "" {
 		re := regexp.QuoteMeta(search)
@@ -127,7 +131,7 @@ func GetThread(c *gin.Context) {
 
 	cursor, err := col.Find(
 		c.Request.Context(),
-		bson.M{"threadId": email.ThreadID},
+		bson.M{"threadId": email.ThreadID, "mailboxId": email.MailboxID},
 		options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}),
 	)
 	if err != nil {
@@ -209,15 +213,33 @@ func SendEmail(c *gin.Context) {
 		return
 	}
 
-	mbCol := database.GetCollection("mailboxes")
-	var mailbox models.Mailbox
-	err := mbCol.FindOne(c.Request.Context(), bson.M{"_id": MustObjectID(req.MailboxID)}).Decode(&mailbox)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "mailbox not found"})
+	recipients, err := mail.ParseAddressList(req.To)
+	if err != nil || len(recipients) == 0 || len(recipients) > maxRecipients {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("to must be 1-%d valid email addresses", maxRecipients)})
+		return
+	}
+	to := make([]string, len(recipients))
+	for i, r := range recipients {
+		to[i] = r.Address
+	}
+	if strings.ContainsAny(req.Subject, "\r\n") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subject"})
+		return
+	}
+	if req.InReplyTo != "" && !messageIDRe.MatchString(req.InReplyTo) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid inReplyTo"})
 		return
 	}
 
 	if !requireMailboxAccess(c, req.MailboxID) {
+		return
+	}
+
+	mbCol := database.GetCollection("mailboxes")
+	var mailbox models.Mailbox
+	err = mbCol.FindOne(c.Request.Context(), bson.M{"_id": MustObjectID(req.MailboxID)}).Decode(&mailbox)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "mailbox not found"})
 		return
 	}
 
@@ -238,7 +260,7 @@ func SendEmail(c *gin.Context) {
 
 	params := &resend.SendEmailRequest{
 		From:    from,
-		To:      []string{req.To},
+		To:      to,
 		Subject: req.Subject,
 		Html:    req.HTMLBody,
 		Text:    req.TextBody,
@@ -257,30 +279,19 @@ func SendEmail(c *gin.Context) {
 		return
 	}
 
-	threadID := uuid()
-	if req.InReplyTo != "" {
-		col := database.GetCollection("emails")
-		var original models.Email
-		err := col.FindOne(c.Request.Context(), bson.M{"messageId": req.InReplyTo}).Decode(&original)
-		if err == nil {
-			threadID = original.ThreadID
-		}
-	}
-
 	emailCol := database.GetCollection("emails")
 	var inReplyTo *string
-	if req.InReplyTo != "" {
-		inReplyTo = &req.InReplyTo
-	}
 	references := []string{}
 	if req.InReplyTo != "" {
+		inReplyTo = &req.InReplyTo
 		references = append(references, req.InReplyTo)
 	}
+	threadID := resolveThreadID(c.Request.Context(), mailbox.ID, messageID, references, inReplyTo)
 
 	email := models.Email{
 		MailboxID:  MustObjectID(req.MailboxID),
 		From:       mailbox.EmailAddress,
-		To:         req.To,
+		To:         strings.Join(to, ", "),
 		Subject:    req.Subject,
 		HTMLBody:   req.HTMLBody,
 		TextBody:   req.TextBody,
@@ -302,6 +313,10 @@ func SendEmail(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "id": result.InsertedID})
 }
+
+const maxRecipients = 20
+
+var messageIDRe = regexp.MustCompile(`^<[^<>\s]{1,250}>$`)
 
 func emailToJSON(e models.Email) gin.H {
 	return gin.H{

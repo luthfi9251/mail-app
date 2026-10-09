@@ -56,11 +56,11 @@ export default function ChangePasswordDialog({
           />
           <Input
             type="password"
-            placeholder="New password"
+            placeholder="New password (min. 8 characters)"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={8}
           />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

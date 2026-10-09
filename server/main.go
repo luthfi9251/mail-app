@@ -1,12 +1,16 @@
 package main
 
 import (
+	"log"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
+	"email-app/config"
 	"email-app/database"
 	"email-app/handlers"
 	"email-app/middleware"
@@ -14,50 +18,35 @@ import (
 
 func main() {
 	godotenv.Load()
+	config.Load()
 
 	database.Connect()
 	database.CreateIndexes()
 
 	r := gin.Default()
+	if err := r.SetTrustedProxies(config.TrustedProxy); err != nil {
+		log.Fatalf("TRUSTED_PROXIES: %v", err)
+	}
 
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:5173")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		c.Next()
-	})
+	r.Use(middleware.SecurityHeaders(), middleware.CORS())
+	r.Use(serveSPA(config.StaticDir))
 
-	r.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api") {
-			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-			c.Next()
-			return
-		}
-		staticPath := "../web/dist"
-		filePath := staticPath + c.Request.URL.Path
-		if _, err := os.Stat(filePath); err == nil {
-			c.File(filePath)
-			c.Abort()
-			return
-		}
-		c.File(staticPath + "/index.html")
-		c.Abort()
-	})
+	loginLimiter := middleware.NewLimiter(20, 15*time.Minute)
+	setupLimiter := middleware.NewLimiter(10, 15*time.Minute)
+
+	// Webhook is not in use yet; receiving goes through SyncMailbox. To enable,
+	// uncomment and set RESEND_WEBHOOK_SECRET. It is called by Resend, not the
+	// browser: authenticated by its signature, outside the RequireJSON (CSRF) middleware.
+	// r.POST("/api/webhooks/resend", middleware.LimitBody(), handlers.ResendWebhook)
 
 	api := r.Group("/api")
+	api.Use(middleware.LimitBody(), middleware.RequireJSON())
 	{
 		api.GET("/auth/setup-status", handlers.SetupStatus)
-		api.POST("/auth/setup", handlers.Setup)
+		api.POST("/auth/setup", setupLimiter.PerIP(), handlers.Setup)
 
-		api.POST("/auth/login", handlers.Login)
+		api.POST("/auth/login", loginLimiter.PerIP(), handlers.Login)
 		api.POST("/auth/logout", handlers.Logout)
-
-		api.POST("/webhooks/resend", handlers.ResendWebhook)
 
 		auth := api.Group("")
 		auth.Use(middleware.AuthRequired())
@@ -82,6 +71,7 @@ func main() {
 				admin.GET("/mailboxes", handlers.ListAllMailboxes)
 				admin.POST("/mailboxes", handlers.CreateMailbox)
 				admin.DELETE("/mailboxes/:id", handlers.DeleteMailbox)
+				admin.GET("/mailboxes/:id/assignments", handlers.ListMailboxAssignments)
 				admin.POST("/assignments", handlers.CreateAssignment)
 				admin.DELETE("/assignments/:id", handlers.DeleteAssignment)
 			}
@@ -93,4 +83,29 @@ func main() {
 		port = "8080"
 	}
 	r.Run(":" + port)
+}
+
+// serveSPA serves the built web app for every non-API path, falling back to
+// index.html for client-side routes. http.Dir confines lookups to dir.
+func serveSPA(dir string) gin.HandlerFunc {
+	fs := http.Dir(dir)
+	return func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Next()
+			return
+		}
+		path := c.Request.URL.Path
+		if f, err := fs.Open(path); err == nil {
+			info, statErr := f.Stat()
+			f.Close()
+			if statErr == nil && !info.IsDir() {
+				c.FileFromFS(path, fs)
+				c.Abort()
+				return
+			}
+		}
+		c.FileFromFS("/", fs)
+		c.Abort()
+	}
 }

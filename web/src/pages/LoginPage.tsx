@@ -14,6 +14,8 @@ const features = [
 export default function LoginPage() {
   const navigate = useNavigate();
   const [setup, setSetup] = useState(false);
+  const [setupEnabled, setSetupEnabled] = useState(true);
+  const [setupToken, setSetupToken] = useState("");
   const [checked, setChecked] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -22,8 +24,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api<{ needsSetup: boolean }>("/auth/setup-status")
-      .then((s) => setSetup(s.needsSetup))
+    api<{ needsSetup: boolean; setupEnabled: boolean }>("/auth/setup-status")
+      .then((s) => {
+        setSetup(s.needsSetup);
+        setSetupEnabled(s.setupEnabled);
+      })
       .catch(() => {})
       .finally(() => setChecked(true));
   }, []);
@@ -37,7 +42,7 @@ export default function LoginPage() {
       if (setup) {
         await api("/auth/setup", {
           method: "POST",
-          body: JSON.stringify({ name, email, password }),
+          body: JSON.stringify({ name, email, password, setupToken }),
         });
       }
       await api("/auth/login", {
@@ -118,6 +123,18 @@ export default function LoginPage() {
                 {error}
               </div>
             )}
+            {setup && !setupEnabled && (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                Setup is disabled. Set SETUP_TOKEN in the server environment and restart it.
+              </div>
+            )}
+            {setup && (
+              <div className="space-y-1.5">
+                <label htmlFor="setupToken" className="text-sm font-medium">Setup token</label>
+                <Input id="setupToken" type="password" autoComplete="off" placeholder="SETUP_TOKEN from server config" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} required />
+              </div>
+            )}
             {setup && (
               <div className="space-y-1.5">
                 <label htmlFor="name" className="text-sm font-medium">Name</label>
@@ -130,7 +147,7 @@ export default function LoginPage() {
             </div>
             <div className="space-y-1.5">
               <label htmlFor="password" className="text-sm font-medium">Password</label>
-              <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={setup ? 8 : undefined} />
             </div>
             <Button type="submit" className="w-full h-11" disabled={loading}>
               {loading && <Loader2 className="animate-spin" />}

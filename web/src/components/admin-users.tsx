@@ -6,6 +6,7 @@ import { Badge } from "./ui/badge";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Card } from "./ui/card";
+import { useConfirm } from "./confirm-dialog";
 import { Plus, Trash2, ShieldCheck, ShieldOff, Users } from "lucide-react";
 
 interface AdminUser {
@@ -27,12 +28,21 @@ export default function AdminUsers() {
     api<AdminUser[]>("/admin/users").then((list) => setUsers(list ?? []));
   }, []);
 
+  const [error, setError] = useState("");
+  const confirm = useConfirm();
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    await api("/admin/users", {
-      method: "POST",
-      body: JSON.stringify({ name, email, password }),
-    });
+    setError("");
+    try {
+      await api("/admin/users", {
+        method: "POST",
+        body: JSON.stringify({ name, email, password }),
+      });
+    } catch (err: any) {
+      setError(err.message);
+      return;
+    }
     setCreateOpen(false);
     setName("");
     setEmail("");
@@ -40,17 +50,48 @@ export default function AdminUsers() {
     api<AdminUser[]>("/admin/users").then((list) => setUsers(list ?? []));
   }
 
-  async function handleDelete(id: string) {
-    await api(`/admin/users/${id}`, { method: "DELETE" });
-    setUsers((prev) => (prev ?? []).filter((u) => u.id !== id));
+  function handleDelete(u: AdminUser) {
+    confirm({
+      title: "Delete user?",
+      description: (
+        <>
+          <strong className="text-foreground">{u.name}</strong> ({u.email}) will be deleted and lose access to all
+          their mailboxes. The mailboxes and their emails are kept. This cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete user",
+      onConfirm: async () => {
+        await api(`/admin/users/${u.id}`, { method: "DELETE" });
+        setUsers((prev) => (prev ?? []).filter((x) => x.id !== u.id));
+      },
+    });
   }
 
-  async function handleRole(id: string, role: string) {
-    await api(`/admin/users/${id}/role`, {
-      method: "PATCH",
-      body: JSON.stringify({ role }),
+  function handleRole(u: AdminUser) {
+    const role = u.role === "admin" ? "user" : "admin";
+    confirm({
+      title: role === "admin" ? "Make admin?" : "Revoke admin?",
+      description:
+        role === "admin" ? (
+          <>
+            <strong className="text-foreground">{u.name}</strong> will be able to manage all users, mailboxes and
+            mailbox access.
+          </>
+        ) : (
+          <>
+            <strong className="text-foreground">{u.name}</strong> will lose access to the admin page.
+          </>
+        ),
+      confirmLabel: role === "admin" ? "Make admin" : "Revoke admin",
+      destructive: role !== "admin",
+      onConfirm: async () => {
+        await api(`/admin/users/${u.id}/role`, {
+          method: "PATCH",
+          body: JSON.stringify({ role }),
+        });
+        setUsers((prev) => (prev ?? []).map((x) => (x.id === u.id ? { ...x, role } : x)));
+      },
     });
-    setUsers((prev) => (prev ?? []).map((u) => (u.id === id ? { ...u, role } : u)));
   }
 
   return (
@@ -92,7 +133,7 @@ export default function AdminUsers() {
                 variant="ghost"
                 size="icon"
                 title={u.role === "admin" ? "Revoke admin" : "Make admin"}
-                onClick={() => handleRole(u.id, u.role === "admin" ? "user" : "admin")}
+                onClick={() => handleRole(u)}
               >
                 {u.role === "admin" ? <ShieldOff /> : <ShieldCheck />}
               </Button>
@@ -101,7 +142,7 @@ export default function AdminUsers() {
                 size="icon"
                 title="Delete user"
                 className="hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => handleDelete(u.id)}
+                onClick={() => handleDelete(u)}
               >
                 <Trash2 />
               </Button>
@@ -116,9 +157,12 @@ export default function AdminUsers() {
             <DialogTitle>Create User</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
+            {error && (
+              <p className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>
+            )}
             <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
             <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <Input type="password" placeholder="Password (min. 8 characters)" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
             <Button type="submit" className="w-full">Create</Button>
           </form>
         </DialogContent>

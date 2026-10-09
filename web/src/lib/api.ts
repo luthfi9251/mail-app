@@ -4,10 +4,11 @@ export async function api<T = unknown>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
+  // The server rejects non-JSON writes (CSRF guard), so always send the header.
   const res = await fetch(BASE + path, {
+    ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
   });
 
   if (!res.ok) {

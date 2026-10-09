@@ -16,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"email-app/database"
+	"email-app/middleware"
 	"email-app/models"
 )
 
@@ -25,6 +26,9 @@ const (
 	syncMaxListPages   = 10 // newest 1000 received emails are scanned per sync
 	syncMaxFetch       = 30 // bodies fetched per sync; the rest are picked up on the next refresh
 )
+
+// One sync per mailbox per window caps how hard a user can drive Resend API calls.
+var syncLimiter = middleware.NewLimiter(1, 10*time.Second)
 
 type resendAttachment struct {
 	ID          string `json:"id"`
@@ -126,6 +130,10 @@ func SyncMailbox(c *gin.Context) {
 	if !requireMailboxAccess(c, mailboxID) {
 		return
 	}
+	if !syncLimiter.Allow(mailboxID) {
+		c.JSON(http.StatusOK, gin.H{"imported": 0, "remaining": 0, "throttled": true})
+		return
+	}
 	ctx := c.Request.Context()
 
 	var mailbox models.Mailbox
@@ -214,13 +222,7 @@ func SyncMailbox(c *gin.Context) {
 		if v := headerString(full.Headers, "references"); v != "" {
 			references = splitRefs(v)
 		}
-		threadID := generateThreadID(full.Subject, references, inReplyTo)
-		if inReplyTo != nil {
-			var original models.Email
-			if emailCol.FindOne(ctx, bson.M{"messageId": *inReplyTo}).Decode(&original) == nil {
-				threadID = original.ThreadID
-			}
-		}
+		threadID := resolveThreadID(ctx, mailbox.ID, messageID, references, inReplyTo)
 
 		attachments := []models.Attachment{}
 		for _, a := range full.Attachments {

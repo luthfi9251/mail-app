@@ -3,23 +3,35 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 
+	"email-app/config"
 	"email-app/database"
 	"email-app/models"
 )
 
-func mailboxDomain() string {
-	if d := os.Getenv("MAILBOX_DOMAIN"); d != "" {
-		return d
+var localPartRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$`)
+
+// parseID reads an ObjectID path/body value, answering 400 when it is malformed.
+func parseID(c *gin.Context, hex string) (bson.ObjectID, bool) {
+	id, err := bson.ObjectIDFromHex(hex)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return id, false
 	}
-	return "tripbooka.com"
+	return id, true
+}
+
+func isSelf(c *gin.Context, id bson.ObjectID) bool {
+	userID, _ := c.Get("userId")
+	return userID == id.Hex()
 }
 
 // createOwnedMailbox inserts a mailbox and assigns it to the user as owner.
@@ -42,7 +54,7 @@ func createOwnedMailbox(ctx context.Context, userID bson.ObjectID, address strin
 }
 
 func GetAdminConfig(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"mailboxDomain": mailboxDomain()})
+	c.JSON(http.StatusOK, gin.H{"mailboxDomain": config.MailboxDomain})
 }
 
 func ListUsers(c *gin.Context) {
@@ -90,7 +102,19 @@ func CreateUser(c *gin.Context) {
 	}
 
 	if req.Role == "" {
-		req.Role = "user"
+		req.Role = models.RoleUser
+	}
+	if !models.ValidUserRole(req.Role) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+		return
+	}
+	if !validEmail(req.Email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid email address"})
+		return
+	}
+	if err := validatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -115,7 +139,7 @@ func CreateUser(c *gin.Context) {
 	userID := result.InsertedID.(bson.ObjectID)
 
 	parts := strings.SplitN(req.Email, "@", 2)
-	if len(parts) == 2 && parts[1] == mailboxDomain() {
+	if len(parts) == 2 && parts[1] == config.MailboxDomain {
 		createOwnedMailbox(c.Request.Context(), userID, req.Email)
 	}
 
@@ -123,12 +147,22 @@ func CreateUser(c *gin.Context) {
 }
 
 func DeleteUser(c *gin.Context) {
+	id, ok := parseID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	if isSelf(c, id) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "you cannot delete your own account"})
+		return
+	}
+
 	col := database.GetCollection("users")
-	_, err := col.DeleteOne(c.Request.Context(), bson.M{"_id": MustObjectID(c.Param("id"))})
+	_, err := col.DeleteOne(c.Request.Context(), bson.M{"_id": id})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
 		return
 	}
+	_, _ = database.GetCollection("usermailboxes").DeleteMany(c.Request.Context(), bson.M{"userId": id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -140,11 +174,28 @@ func SetUserRole(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "role required"})
 		return
 	}
+	if !models.ValidUserRole(req.Role) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+		return
+	}
+	id, ok := parseID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	// Admins can't demote themselves, so there is always at least one admin left.
+	if isSelf(c, id) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "you cannot change your own role"})
+		return
+	}
 
 	col := database.GetCollection("users")
-	_, err := col.UpdateByID(c.Request.Context(), MustObjectID(c.Param("id")), bson.M{"$set": bson.M{"role": req.Role}})
+	res, err := col.UpdateByID(c.Request.Context(), id, bson.M{"$set": bson.M{"role": req.Role}})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role"})
+		return
+	}
+	if res.MatchedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -189,11 +240,15 @@ func CreateMailbox(c *gin.Context) {
 		return
 	}
 
-	domain := mailboxDomain()
+	localPart := strings.ToLower(strings.TrimSpace(req.LocalPart))
+	if !localPartRe.MatchString(localPart) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid local part: use letters, digits, . _ + -"})
+		return
+	}
 
 	col := database.GetCollection("mailboxes")
 	_, err := col.InsertOne(c.Request.Context(), models.Mailbox{
-		EmailAddress: req.LocalPart + "@" + domain,
+		EmailAddress: localPart + "@" + config.MailboxDomain,
 		CreatedAt:    time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -205,19 +260,28 @@ func CreateMailbox(c *gin.Context) {
 }
 
 func DeleteMailbox(c *gin.Context) {
+	id, ok := parseID(c, c.Param("id"))
+	if !ok {
+		return
+	}
 	emailCol := database.GetCollection("emails")
-	count, _ := emailCol.CountDocuments(c.Request.Context(), bson.M{"mailboxId": MustObjectID(c.Param("id"))})
+	count, err := emailCol.CountDocuments(c.Request.Context(), bson.M{"mailboxId": id})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete mailbox"})
+		return
+	}
 	if count > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete mailbox with existing emails"})
 		return
 	}
 
 	col := database.GetCollection("mailboxes")
-	_, err := col.DeleteOne(c.Request.Context(), bson.M{"_id": MustObjectID(c.Param("id"))})
+	_, err = col.DeleteOne(c.Request.Context(), bson.M{"_id": id})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete mailbox"})
 		return
 	}
+	_, _ = database.GetCollection("usermailboxes").DeleteMany(c.Request.Context(), bson.M{"mailboxId": id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -234,28 +298,112 @@ func CreateAssignment(c *gin.Context) {
 	if req.Role == "" {
 		req.Role = "member"
 	}
+	if req.Role != "member" && req.Role != "owner" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+		return
+	}
+	userID, ok := parseID(c, req.UserID)
+	if !ok {
+		return
+	}
+	mailboxID, ok := parseID(c, req.MailboxID)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	if n, _ := database.GetCollection("users").CountDocuments(ctx, bson.M{"_id": userID}); n == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	if n, _ := database.GetCollection("mailboxes").CountDocuments(ctx, bson.M{"_id": mailboxID}); n == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "mailbox not found"})
+		return
+	}
 
 	col := database.GetCollection("usermailboxes")
-	_, err := col.InsertOne(c.Request.Context(), models.UserMailbox{
-		UserID:    MustObjectID(req.UserID),
-		MailboxID: MustObjectID(req.MailboxID),
+	// The unique (userId, mailboxId) index also enforces this; checking first
+	// gives a clear error even if index creation failed at startup.
+	if n, _ := col.CountDocuments(ctx, bson.M{"userId": userID, "mailboxId": mailboxID}); n > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "user already has access to this mailbox"})
+		return
+	}
+	res, err := col.InsertOne(ctx, models.UserMailbox{
+		UserID:    userID,
+		MailboxID: mailboxID,
 		Role:      req.Role,
 		CreatedAt: time.Now().UnixMilli(),
 	})
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "assignment already exists"})
+		c.JSON(http.StatusConflict, gin.H{"error": "user already has access to this mailbox"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"success": true})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "id": res.InsertedID.(bson.ObjectID).Hex()})
 }
 
 func DeleteAssignment(c *gin.Context) {
+	id, ok := parseID(c, c.Param("id"))
+	if !ok {
+		return
+	}
 	col := database.GetCollection("usermailboxes")
-	_, err := col.DeleteOne(c.Request.Context(), bson.M{"_id": MustObjectID(c.Param("id"))})
+	_, err := col.DeleteOne(c.Request.Context(), bson.M{"_id": id})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete assignment"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ListMailboxAssignments returns who can access a mailbox, with user details.
+func ListMailboxAssignments(c *gin.Context) {
+	mailboxID, ok := parseID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	cursor, err := database.GetCollection("usermailboxes").Find(ctx, bson.M{"mailboxId": mailboxID},
+		options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch assignments"})
+		return
+	}
+	var assignments []models.UserMailbox
+	if err := cursor.All(ctx, &assignments); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse assignments"})
+		return
+	}
+
+	userIDs := make([]bson.ObjectID, len(assignments))
+	for i, a := range assignments {
+		userIDs[i] = a.UserID
+	}
+	users := map[bson.ObjectID]models.User{}
+	if len(userIDs) > 0 {
+		uc, err := database.GetCollection("users").Find(ctx, bson.M{"_id": bson.M{"$in": userIDs}})
+		if err == nil {
+			var list []models.User
+			if uc.All(ctx, &list) == nil {
+				for _, u := range list {
+					users[u.ID] = u
+				}
+			}
+		}
+	}
+
+	result := []gin.H{}
+	for _, a := range assignments {
+		u, ok := users[a.UserID]
+		if !ok {
+			continue // user was deleted
+		}
+		result = append(result, gin.H{
+			"id":     a.ID.Hex(),
+			"userId": u.ID.Hex(),
+			"name":   u.Name,
+			"email":  u.Email,
+			"role":   a.Role,
+		})
+	}
+	c.JSON(http.StatusOK, result)
 }

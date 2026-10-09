@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
+	"email-app/config"
 	"email-app/database"
 )
 
@@ -29,13 +30,16 @@ func newTestRouter(t *testing.T) *gin.Engine {
 		t.Fatal(err)
 	}
 	database.DB = client.Database("email-app-test")
-	for _, name := range []string{"users", "mailboxes", "usermailboxes"} {
+	config.SetupToken = "test-setup-token"
+	config.MailboxDomain = "example.com"
+	for _, name := range []string{"users", "mailboxes", "usermailboxes", "emails"} {
 		if err := database.DB.Collection(name).Drop(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
+	database.CreateIndexes()
 	t.Cleanup(func() {
-		for _, name := range []string{"users", "mailboxes", "usermailboxes"} {
+		for _, name := range []string{"users", "mailboxes", "usermailboxes", "emails"} {
 			_ = database.DB.Collection(name).Drop(context.Background())
 		}
 		_ = client.Disconnect(context.Background())
@@ -61,22 +65,32 @@ func TestSetupFlow(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/setup-status", nil))
-	if got := w.Body.String(); got != `{"needsSetup":true}` {
+	if got := w.Body.String(); got != `{"needsSetup":true,"setupEnabled":true}` {
 		t.Fatalf("empty db: want needsSetup true, got %s", got)
 	}
 
-	w = postJSON(r, "/setup", `{"email":"admin@x.com","name":"Admin","password":"secret"}`)
+	w = postJSON(r, "/setup", `{"email":"admin@x.com","name":"Admin","password":"secret123","setupToken":"wrong"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("wrong setup token: want 403, got %d %s", w.Code, w.Body.String())
+	}
+
+	w = postJSON(r, "/setup", `{"email":"admin@x.com","name":"Admin","password":"short","setupToken":"test-setup-token"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("weak password: want 400, got %d %s", w.Code, w.Body.String())
+	}
+
+	w = postJSON(r, "/setup", `{"email":"admin@x.com","name":"Admin","password":"secret123","setupToken":"test-setup-token"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create admin: want 201, got %d %s", w.Code, w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/setup-status", nil))
-	if got := w.Body.String(); got != `{"needsSetup":false}` {
+	if got := w.Body.String(); got != `{"needsSetup":false,"setupEnabled":true}` {
 		t.Fatalf("after setup: want needsSetup false, got %s", got)
 	}
 
-	w = postJSON(r, "/setup", `{"email":"other@x.com","name":"Other","password":"secret"}`)
+	w = postJSON(r, "/setup", `{"email":"other@x.com","name":"Other","password":"secret123","setupToken":"test-setup-token"}`)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("second setup: want 409, got %d %s", w.Code, w.Body.String())
 	}
@@ -94,7 +108,7 @@ func TestSetupFlow(t *testing.T) {
 	}
 
 	// admin@x.com is not on the mailbox domain, so it falls back to admin@<domain>.
-	want := "admin@" + mailboxDomain()
+	want := "admin@" + config.MailboxDomain
 	var mb struct {
 		ID bson.ObjectID `bson:"_id"`
 	}

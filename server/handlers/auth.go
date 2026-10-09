@@ -1,20 +1,50 @@
 package handlers
 
 import (
+	"crypto/subtle"
+	"errors"
 	"net/http"
-	"os"
+	"net/mail"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/crypto/bcrypt"
 
+	"email-app/config"
 	"email-app/database"
 	"email-app/middleware"
 	"email-app/models"
 )
+
+var (
+	// Per-account limits complement the per-IP limit on the routes, so a
+	// distributed guesser still can't hammer a single account.
+	loginAccountLimiter   = middleware.NewLimiter(10, 15*time.Minute)
+	changePasswordLimiter = middleware.NewLimiter(10, 15*time.Minute)
+
+	// Compared against when the email is unknown, so a miss costs the same
+	// bcrypt time as a hit and response timing doesn't reveal valid emails.
+	dummyHash, _ = bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), bcrypt.DefaultCost)
+)
+
+const minPasswordLen = 8
+
+func validatePassword(p string) error {
+	if len(p) < minPasswordLen {
+		return errors.New("password must be at least 8 characters")
+	}
+	if len(p) > 72 { // bcrypt only uses the first 72 bytes
+		return errors.New("password must be at most 72 bytes")
+	}
+	return nil
+}
+
+func validEmail(s string) bool {
+	a, err := mail.ParseAddress(s)
+	return err == nil && a.Address == s
+}
 
 func Login(c *gin.Context) {
 	var req struct {
@@ -26,34 +56,40 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	accountKey := strings.ToLower(strings.TrimSpace(req.Email))
+	if !loginAccountLimiter.Allow(accountKey) {
+		middleware.TooManyRequests(c)
+		return
+	}
+
 	col := database.GetCollection("users")
 	var user models.User
 	err := col.FindOne(c.Request.Context(), bson.M{"email": req.Email}).Decode(&user)
 	if err != nil {
+		bcrypt.CompareHashAndPassword(dummyHash, []byte(req.Password))
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+	ok, legacy := checkPassword(user.Password, req.Password)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
+	loginAccountLimiter.Reset(accountKey)
 
-	claims := middleware.Claims{
-		UserID: user.ID.Hex(),
-		Email:  user.Email,
-		Role:   user.Role,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
-		},
+	// Upgrade an imported v1 (scrypt) hash to bcrypt now that we know the password.
+	if legacy {
+		if hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost); err == nil {
+			_, _ = col.UpdateByID(c.Request.Context(), user.ID, bson.M{"$set": bson.M{"password": string(hash)}})
+		}
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, _ := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
-
-	c.SetCookie("token", tokenString, 7*24*3600, "/", "", false, true)
+	if err := middleware.IssueToken(c, user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"token": tokenString,
 		"user": gin.H{
 			"id":    user.ID.Hex(),
 			"email": user.Email,
@@ -69,7 +105,7 @@ func SetupStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check setup status"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"needsSetup": count == 0})
+	c.JSON(http.StatusOK, gin.H{"needsSetup": count == 0, "setupEnabled": config.SetupToken != ""})
 }
 
 func Setup(c *gin.Context) {
@@ -77,9 +113,29 @@ func Setup(c *gin.Context) {
 		Email    string `json:"email" binding:"required"`
 		Name     string `json:"name" binding:"required"`
 		Password string `json:"password" binding:"required"`
+		Token    string `json:"setupToken"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email, name and password required"})
+		return
+	}
+
+	// The first admin can only be created by someone who knows SETUP_TOKEN,
+	// so a freshly deployed instance can't be claimed by a stranger.
+	if config.SetupToken == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "setup is disabled: set SETUP_TOKEN on the server"})
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(config.SetupToken)) != 1 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid setup token"})
+		return
+	}
+	if !validEmail(req.Email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid email address"})
+		return
+	}
+	if err := validatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -105,7 +161,7 @@ func Setup(c *gin.Context) {
 		Email:     req.Email,
 		Name:      req.Name,
 		Password:  string(hash),
-		Role:      "admin",
+		Role:      models.RoleAdmin,
 		CreatedAt: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -117,8 +173,8 @@ func Setup(c *gin.Context) {
 	// fall back to <local-part>@<mailbox domain>.
 	address := req.Email
 	parts := strings.SplitN(req.Email, "@", 2)
-	if parts[0] != "" && (len(parts) != 2 || parts[1] != mailboxDomain()) {
-		address = parts[0] + "@" + mailboxDomain()
+	if parts[0] != "" && (len(parts) != 2 || parts[1] != config.MailboxDomain) {
+		address = parts[0] + "@" + config.MailboxDomain
 	}
 	if err := createOwnedMailbox(c.Request.Context(), result.InsertedID.(bson.ObjectID), address); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "admin created but failed to create mailbox"})
@@ -129,7 +185,7 @@ func Setup(c *gin.Context) {
 }
 
 func Logout(c *gin.Context) {
-	c.SetCookie("token", "", -1, "/", "", false, true)
+	middleware.ClearToken(c)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -162,7 +218,16 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
+	if err := validatePassword(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	userID, _ := c.Get("userId")
+	if !changePasswordLimiter.Allow(userID.(string)) {
+		middleware.TooManyRequests(c)
+		return
+	}
 	col := database.GetCollection("users")
 
 	var user models.User
@@ -172,7 +237,7 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil {
+	if ok, _ := checkPassword(user.Password, req.CurrentPassword); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "current password is incorrect"})
 		return
 	}
@@ -183,9 +248,19 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	_, err = col.UpdateByID(c.Request.Context(), user.ID, bson.M{"$set": bson.M{"password": string(hash)}})
+	// Bumping tokenVersion signs out every other session; this one gets a fresh token.
+	_, err = col.UpdateByID(c.Request.Context(), user.ID, bson.M{
+		"$set": bson.M{"password": string(hash)},
+		"$inc": bson.M{"tokenVersion": 1},
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+	changePasswordLimiter.Reset(userID.(string))
+	user.TokenVersion++
+	if err := middleware.IssueToken(c, user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password changed, please sign in again"})
 		return
 	}
 
