@@ -34,6 +34,7 @@ func main() {
 
 	r.Use(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 			c.Next()
 			return
 		}

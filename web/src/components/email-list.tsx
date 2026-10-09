@@ -35,6 +35,7 @@ export default function EmailList({ mailboxId }: { mailboxId: string }) {
       mailboxId,
       page: String(pageNum),
       limit: "20",
+      _: String(Date.now()),
     });
     if (tab === "starred") {
       params.set("starred", "true");
@@ -63,6 +64,12 @@ export default function EmailList({ mailboxId }: { mailboxId: string }) {
 
   useEffect(() => {
     fetchEmails(true);
+  }, [mailboxId, tab, debouncedSearch]);
+
+  useEffect(() => {
+    if (tab !== "inbox" || debouncedSearch) return;
+    const interval = setInterval(() => fetchEmails(true), 15000);
+    return () => clearInterval(interval);
   }, [mailboxId, tab, debouncedSearch]);
 
   useEffect(() => {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -68,7 +69,7 @@ func CreateUser(c *gin.Context) {
 	}
 
 	col := database.GetCollection("users")
-	_, err = col.InsertOne(c.Request.Context(), models.User{
+	result, err := col.InsertOne(c.Request.Context(), models.User{
 		Email:     req.Email,
 		Name:      req.Name,
 		Password:  string(hash),
@@ -78,6 +79,34 @@ func CreateUser(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "email already exists"})
 		return
+	}
+
+	userID := result.InsertedID.(bson.ObjectID)
+
+	domain := os.Getenv("MAILBOX_DOMAIN")
+	if domain == "" {
+		domain = "tripbooka.com"
+	}
+
+	parts := strings.SplitN(req.Email, "@", 2)
+	var mailboxID bson.ObjectID
+	if len(parts) == 2 && parts[1] == domain {
+		mbCol := database.GetCollection("mailboxes")
+		mbResult, err := mbCol.InsertOne(c.Request.Context(), models.Mailbox{
+			EmailAddress: req.Email,
+			CreatedAt:    time.Now().UnixMilli(),
+		})
+		if err == nil {
+			mailboxID = mbResult.InsertedID.(bson.ObjectID)
+
+			umCol := database.GetCollection("usermailboxes")
+			umCol.InsertOne(c.Request.Context(), models.UserMailbox{
+				UserID:    userID,
+				MailboxID: mailboxID,
+				Role:      "owner",
+				CreatedAt: time.Now().UnixMilli(),
+			})
+		}
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"success": true})
