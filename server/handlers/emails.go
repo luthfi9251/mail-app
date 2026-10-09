@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/mail"
 	"os"
 	"regexp"
 	"strconv"
@@ -92,7 +93,7 @@ func ListEmails(c *gin.Context) {
 		return
 	}
 
-	var result []gin.H
+	result := []gin.H{}
 	for _, e := range emails {
 		result = append(result, emailToJSON(e))
 	}
@@ -141,8 +142,16 @@ func GetThread(c *gin.Context) {
 		return
 	}
 
-	var result []gin.H
+	// Opening a thread marks every message in it as read.
+	_, _ = col.UpdateMany(
+		c.Request.Context(),
+		bson.M{"threadId": email.ThreadID, "mailboxId": email.MailboxID, "read": false},
+		bson.M{"$set": bson.M{"read": true}},
+	)
+
+	result := []gin.H{}
 	for _, e := range emails {
+		e.Read = true
 		result = append(result, emailToJSON(e))
 	}
 
@@ -212,11 +221,23 @@ func SendEmail(c *gin.Context) {
 		return
 	}
 
+	// Show the sender's name in the From header: "Name <mailbox@domain>".
+	from := mailbox.EmailAddress
+	if uid, ok := c.Get("userId"); ok {
+		var user models.User
+		err := database.GetCollection("users").FindOne(
+			c.Request.Context(), bson.M{"_id": MustObjectID(uid.(string))},
+		).Decode(&user)
+		if err == nil && user.Name != "" {
+			from = (&mail.Address{Name: user.Name, Address: mailbox.EmailAddress}).String()
+		}
+	}
+
 	client := resend.NewClient(os.Getenv("RESEND_API_KEY"))
 	messageID := fmt.Sprintf("<%s@email-app>", uuid())
 
 	params := &resend.SendEmailRequest{
-		From:    mailbox.EmailAddress,
+		From:    from,
 		To:      []string{req.To},
 		Subject: req.Subject,
 		Html:    req.HTMLBody,

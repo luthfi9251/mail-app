@@ -28,7 +28,7 @@ func ListMailboxes(c *gin.Context) {
 	}
 
 	mbCol := database.GetCollection("mailboxes")
-	var result []gin.H
+	result := []gin.H{}
 	for _, a := range assignments {
 		var mb models.Mailbox
 		err := mbCol.FindOne(c.Request.Context(), bson.M{"_id": a.MailboxID}).Decode(&mb)

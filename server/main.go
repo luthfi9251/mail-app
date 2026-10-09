@@ -51,6 +51,9 @@ func main() {
 
 	api := r.Group("/api")
 	{
+		api.GET("/auth/setup-status", handlers.SetupStatus)
+		api.POST("/auth/setup", handlers.Setup)
+
 		api.POST("/auth/login", handlers.Login)
 		api.POST("/auth/logout", handlers.Logout)
 
@@ -63,6 +66,7 @@ func main() {
 			auth.POST("/auth/change-password", handlers.ChangePassword)
 			auth.GET("/mailboxes", handlers.ListMailboxes)
 			auth.GET("/mailboxes/:id", handlers.GetMailbox)
+			auth.POST("/mailboxes/:id/sync", handlers.SyncMailbox)
 			auth.GET("/emails", handlers.ListEmails)
 			auth.GET("/emails/:id/thread", handlers.GetThread)
 			auth.PATCH("/emails/:id/star", handlers.ToggleStar)
@@ -70,6 +74,7 @@ func main() {
 			admin := auth.Group("/admin")
 			admin.Use(middleware.AdminRequired())
 			{
+				admin.GET("/config", handlers.GetAdminConfig)
 				admin.GET("/users", handlers.ListUsers)
 				admin.POST("/users", handlers.CreateUser)
 				admin.DELETE("/users/:id", handlers.DeleteUser)

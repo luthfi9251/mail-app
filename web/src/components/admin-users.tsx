@@ -3,9 +3,10 @@ import { api } from "../lib/api";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Plus, Trash2, Shield, ShieldOff } from "lucide-react";
+import { Card } from "./ui/card";
+import { Plus, Trash2, ShieldCheck, ShieldOff, Users } from "lucide-react";
 
 interface AdminUser {
   id: string;
@@ -23,7 +24,7 @@ export default function AdminUsers() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    api<AdminUser[]>("/admin/users").then(setUsers);
+    api<AdminUser[]>("/admin/users").then((list) => setUsers(list ?? []));
   }, []);
 
   async function handleCreate(e: React.FormEvent) {
@@ -36,12 +37,12 @@ export default function AdminUsers() {
     setName("");
     setEmail("");
     setPassword("");
-    api<AdminUser[]>("/admin/users").then(setUsers);
+    api<AdminUser[]>("/admin/users").then((list) => setUsers(list ?? []));
   }
 
   async function handleDelete(id: string) {
     await api(`/admin/users/${id}`, { method: "DELETE" });
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+    setUsers((prev) => (prev ?? []).filter((u) => u.id !== id));
   }
 
   async function handleRole(id: string, role: string) {
@@ -49,52 +50,65 @@ export default function AdminUsers() {
       method: "PATCH",
       body: JSON.stringify({ role }),
     });
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role } : u)));
+    setUsers((prev) => (prev ?? []).map((u) => (u.id === id ? { ...u, role } : u)));
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Users ({users.length})</CardTitle>
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1">
-          <Plus className="h-4 w-4" /> Create User
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">Users</h2>
+          <p className="text-sm text-muted-foreground">{users?.length ?? 0} total</p>
+        </div>
+        <Button onClick={() => setCreateOpen(true)}>
+          <Plus /> Create User
         </Button>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          {users.map((u) => (
-            <div key={u.id} className="flex items-center justify-between p-3 rounded-lg border">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
-                  {u.name.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-sm font-medium">{u.name}</p>
-                  <p className="text-xs text-muted-foreground">{u.email}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={u.role === "admin" ? "default" : "secondary"}>
-                  {u.role}
-                </Badge>
-                <span className="text-xs text-muted-foreground">{u.mailboxCount} mailboxes</span>
-                {u.role === "admin" ? (
-                  <Button variant="ghost" size="icon" onClick={() => handleRole(u.id, "user")}>
-                    <ShieldOff className="h-4 w-4" />
-                  </Button>
-                ) : (
-                  <Button variant="ghost" size="icon" onClick={() => handleRole(u.id, "admin")}>
-                    <Shield className="h-4 w-4" />
-                  </Button>
-                )}
-                <Button variant="ghost" size="icon" onClick={() => handleDelete(u.id)}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
+      </div>
+
+      <Card className="divide-y overflow-hidden">
+        {(users?.length ?? 0) === 0 && (
+          <div className="flex flex-col items-center gap-2 p-10 text-sm text-muted-foreground">
+            <Users className="h-8 w-8 opacity-40" />
+            No users yet.
+          </div>
+        )}
+        {users?.map((u) => (
+          <div key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40 sm:px-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="text-sm">{u.name.charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{u.name}</p>
+                <p className="truncate text-xs text-muted-foreground">{u.email}</p>
               </div>
             </div>
-          ))}
-        </div>
-      </CardContent>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <Badge variant={u.role === "admin" ? "default" : "secondary"} className="capitalize">
+                {u.role}
+              </Badge>
+              <span className="hidden text-xs text-muted-foreground sm:inline">{u.mailboxCount} mailboxes</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                title={u.role === "admin" ? "Revoke admin" : "Make admin"}
+                onClick={() => handleRole(u.id, u.role === "admin" ? "user" : "admin")}
+              >
+                {u.role === "admin" ? <ShieldOff /> : <ShieldCheck />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Delete user"
+                className="hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => handleDelete(u.id)}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </Card>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
@@ -109,6 +123,6 @@ export default function AdminUsers() {
           </form>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   );
 }

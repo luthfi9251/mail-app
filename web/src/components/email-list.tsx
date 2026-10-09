@@ -4,7 +4,6 @@ import { api, type EmailItem, type PaginatedResponse } from "../lib/api";
 import EmailCard from "./email-card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { Skeleton } from "./ui/skeleton";
 import { Search, RefreshCw, Menu } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -20,6 +19,7 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [tab, setTab] = useState<Tab>("inbox");
+  const [syncing, setSyncing] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,20 +40,20 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
     if (tab === "starred") {
       params.set("starred", "true");
     } else {
-      params.set("direction", tab);
+      params.set("direction", tab === "sent" ? "outbound" : "inbound");
     }
     if (debouncedSearch) params.set("search", debouncedSearch);
 
     try {
       const data = await api<PaginatedResponse>(`/emails?${params}`);
       if (reset) {
-        setEmails(data.emails);
+        setEmails(data?.emails ?? []);
         setPage(1);
       } else {
-        setEmails((prev) => [...prev, ...data.emails]);
+        setEmails((prev) => [...(prev ?? []), ...(data?.emails ?? [])]);
         setPage(pageNum);
       }
-      setHasMore(data.hasMore);
+      setHasMore(data?.hasMore ?? false);
     } catch {
       // ignore
     } finally {
@@ -62,15 +62,40 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
     }
   }
 
+  // Pull new mail from Resend into the DB, then reload the list.
+  async function syncAndRefresh() {
+    setSyncing(true);
+    try {
+      await api(`/mailboxes/${mailboxId}/sync`, { method: "POST" });
+    } catch {
+      // fall through: still show what is already in the DB
+    } finally {
+      setSyncing(false);
+    }
+    await fetchEmails(true);
+  }
+
   useEffect(() => {
     fetchEmails(true);
   }, [mailboxId, tab, debouncedSearch]);
 
   useEffect(() => {
-    if (tab !== "inbox" || debouncedSearch) return;
-    const interval = setInterval(() => fetchEmails(true), 15000);
-    return () => clearInterval(interval);
-  }, [mailboxId, tab, debouncedSearch]);
+    setEmails([]);
+  }, [mailboxId]);
+
+  // The server marks the thread read when it is opened; mirror that locally.
+  useEffect(() => {
+    if (!emailId) return;
+    const opened = emails.find((e) => e.id === emailId);
+    if (!opened || opened.read) return;
+    setEmails((prev) =>
+      prev.map((e) => (e.threadId === opened.threadId ? { ...e, read: true } : e))
+    );
+  }, [emailId, emails]);
+
+  useEffect(() => {
+    syncAndRefresh();
+  }, [mailboxId]);
 
   useEffect(() => {
     if (!sentinelRef.current) return;
@@ -105,13 +130,13 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
   ];
 
   return (
-    <div className="w-full lg:w-[420px] lg:min-w-[420px] lg:max-w-[420px] lg:shrink-0 border-r flex flex-col h-full bg-card">
-      <div className="p-4 border-b space-y-3">
+    <div className="w-full lg:w-[420px] lg:min-w-[420px] lg:max-w-[420px] lg:shrink-0 border-r flex flex-col h-full min-w-0 bg-background">
+      <div className="p-4 border-b bg-card space-y-3">
         <div className="flex items-center gap-2 lg:hidden">
           <Button variant="ghost" size="icon" onClick={onToggleSidebar}>
             <Menu className="h-5 w-5" />
           </Button>
-          <span className="font-semibold">Email App</span>
+          <span className="font-semibold tracking-tight">Email App</span>
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -119,20 +144,20 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
             placeholder="Search emails..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 bg-muted/60 border-transparent shadow-none focus-visible:bg-card"
           />
         </div>
         <div className="flex items-center justify-between">
-          <div className="flex gap-1">
+          <div className="flex gap-1 rounded-lg bg-muted p-1">
             {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 className={cn(
-                  "px-3 py-1.5 text-sm rounded-md transition-colors font-medium",
+                  "px-3 py-1 text-sm rounded-md transition-all font-medium",
                   tab === t.key
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 {t.label}
@@ -142,29 +167,19 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => fetchEmails(true)}
+            onClick={syncAndRefresh}
+            disabled={syncing || loading}
             title="Refresh"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className={cn("h-4 w-4", (syncing || loading) && "animate-spin")} />
           </Button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="p-4 space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex gap-3">
-                <Skeleton className="h-8 w-8 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : emails.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm p-4 text-center">
+      <div className="flex-1 overflow-y-auto scroll-thin">
+        {(emails?.length ?? 0) === 0 ? (
+          loading || syncing ? null : (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm p-8 text-center">
             {debouncedSearch
               ? "No emails match your search."
               : tab === "starred"
@@ -173,9 +188,10 @@ export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: s
               ? "No sent emails yet."
               : "No emails yet."}
           </div>
+          )
         ) : (
           <div>
-            {emails.map((email) => (
+            {emails?.map((email) => (
               <EmailCard
                 key={email.id}
                 email={email}

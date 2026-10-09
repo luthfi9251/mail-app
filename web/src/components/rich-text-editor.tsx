@@ -22,7 +22,7 @@ export default function RichTextEditor({
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
       attributes: {
-        class: "prose prose-sm max-w-none min-h-[200px] px-3 py-2 focus:outline-none",
+        class: "text-sm min-h-[200px] px-3 py-3 focus:outline-none",
       },
     },
   });
@@ -30,41 +30,45 @@ export default function RichTextEditor({
   if (!editor) return null;
 
   return (
-    <div className="border rounded-md">
-      <div className="flex gap-1 px-2 py-1.5 border-b bg-muted/50">
+    <div className="overflow-hidden rounded-lg border border-input bg-card transition-all focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/15">
+      <div className="flex gap-1 px-2 py-1.5 border-b bg-muted/40">
         <Button
+          type="button"
           variant="ghost"
           size="icon"
           onClick={() => editor.chain().focus().toggleBold().run()}
           data-active={editor.isActive("bold")}
-          className="h-8 w-8 data-[active=true]:bg-accent"
+          className="h-8 w-8 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         >
           <Bold className="h-4 w-4" />
         </Button>
         <Button
+          type="button"
           variant="ghost"
           size="icon"
           onClick={() => editor.chain().focus().toggleItalic().run()}
           data-active={editor.isActive("italic")}
-          className="h-8 w-8 data-[active=true]:bg-accent"
+          className="h-8 w-8 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         >
           <Italic className="h-4 w-4" />
         </Button>
         <Button
+          type="button"
           variant="ghost"
           size="icon"
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           data-active={editor.isActive("bulletList")}
-          className="h-8 w-8 data-[active=true]:bg-accent"
+          className="h-8 w-8 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         >
           <List className="h-4 w-4" />
         </Button>
         <Button
+          type="button"
           variant="ghost"
           size="icon"
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
           data-active={editor.isActive("orderedList")}
-          className="h-8 w-8 data-[active=true]:bg-accent"
+          className="h-8 w-8 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         >
           <ListOrdered className="h-4 w-4" />
         </Button>

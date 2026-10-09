@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,36 @@ import (
 	"email-app/database"
 	"email-app/models"
 )
+
+func mailboxDomain() string {
+	if d := os.Getenv("MAILBOX_DOMAIN"); d != "" {
+		return d
+	}
+	return "tripbooka.com"
+}
+
+// createOwnedMailbox inserts a mailbox and assigns it to the user as owner.
+func createOwnedMailbox(ctx context.Context, userID bson.ObjectID, address string) error {
+	now := time.Now().UnixMilli()
+	mb, err := database.GetCollection("mailboxes").InsertOne(ctx, models.Mailbox{
+		EmailAddress: address,
+		CreatedAt:    now,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = database.GetCollection("usermailboxes").InsertOne(ctx, models.UserMailbox{
+		UserID:    userID,
+		MailboxID: mb.InsertedID.(bson.ObjectID),
+		Role:      "owner",
+		CreatedAt: now,
+	})
+	return err
+}
+
+func GetAdminConfig(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"mailboxDomain": mailboxDomain()})
+}
 
 func ListUsers(c *gin.Context) {
 	col := database.GetCollection("users")
@@ -30,7 +61,7 @@ func ListUsers(c *gin.Context) {
 	}
 
 	umCol := database.GetCollection("usermailboxes")
-	var result []gin.H
+	result := []gin.H{}
 	for _, u := range users {
 		count, _ := umCol.CountDocuments(c.Request.Context(), bson.M{"userId": u.ID})
 		result = append(result, gin.H{
@@ -83,30 +114,9 @@ func CreateUser(c *gin.Context) {
 
 	userID := result.InsertedID.(bson.ObjectID)
 
-	domain := os.Getenv("MAILBOX_DOMAIN")
-	if domain == "" {
-		domain = "tripbooka.com"
-	}
-
 	parts := strings.SplitN(req.Email, "@", 2)
-	var mailboxID bson.ObjectID
-	if len(parts) == 2 && parts[1] == domain {
-		mbCol := database.GetCollection("mailboxes")
-		mbResult, err := mbCol.InsertOne(c.Request.Context(), models.Mailbox{
-			EmailAddress: req.Email,
-			CreatedAt:    time.Now().UnixMilli(),
-		})
-		if err == nil {
-			mailboxID = mbResult.InsertedID.(bson.ObjectID)
-
-			umCol := database.GetCollection("usermailboxes")
-			umCol.InsertOne(c.Request.Context(), models.UserMailbox{
-				UserID:    userID,
-				MailboxID: mailboxID,
-				Role:      "owner",
-				CreatedAt: time.Now().UnixMilli(),
-			})
-		}
+	if len(parts) == 2 && parts[1] == mailboxDomain() {
+		createOwnedMailbox(c.Request.Context(), userID, req.Email)
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"success": true})
@@ -156,7 +166,7 @@ func ListAllMailboxes(c *gin.Context) {
 	}
 
 	umCol := database.GetCollection("usermailboxes")
-	var result []gin.H
+	result := []gin.H{}
 	for _, mb := range mailboxes {
 		count, _ := umCol.CountDocuments(c.Request.Context(), bson.M{"mailboxId": mb.ID})
 		result = append(result, gin.H{
@@ -179,10 +189,7 @@ func CreateMailbox(c *gin.Context) {
 		return
 	}
 
-	domain := os.Getenv("MAILBOX_DOMAIN")
-	if domain == "" {
-		domain = "tripbooka.com"
-	}
+	domain := mailboxDomain()
 
 	col := database.GetCollection("mailboxes")
 	_, err := col.InsertOne(c.Request.Context(), models.Mailbox{

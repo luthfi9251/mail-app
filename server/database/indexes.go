@@ -10,8 +10,19 @@ import (
 )
 
 func CreateIndexes() {
+	_, err := GetCollection("users").Indexes().CreateOne(
+		context.Background(),
+		mongo.IndexModel{
+			Keys:    bson.D{{Key: "email", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		},
+	)
+	if err != nil {
+		log.Printf("Warning: failed to create user email index: %v", err)
+	}
+
 	userMailboxCol := GetCollection("usermailboxes")
-	_, err := userMailboxCol.Indexes().CreateOne(
+	_, err = userMailboxCol.Indexes().CreateOne(
 		context.Background(),
 		mongo.IndexModel{
 			Keys:    bson.D{{Key: "userId", Value: 1}, {Key: "mailboxId", Value: 1}},
@@ -27,6 +38,8 @@ func CreateIndexes() {
 		{Keys: bson.D{{Key: "mailboxId", Value: 1}, {Key: "createdAt", Value: -1}}},
 		{Keys: bson.D{{Key: "mailboxId", Value: 1}, {Key: "direction", Value: 1}, {Key: "createdAt", Value: -1}}},
 		{Keys: bson.D{{Key: "messageId", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "resendId", Value: 1}}, Options: options.Index().SetUnique(true).
+			SetPartialFilterExpression(bson.M{"resendId": bson.M{"$type": "string"}})},
 	})
 	if err != nil {
 		log.Printf("Warning: failed to create email indexes: %v", err)

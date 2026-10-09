@@ -11,7 +11,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     api<Mailbox[]>("/mailboxes")
-      .then((list) => {
+      .then((res) => {
+        const list = res ?? [];
         setMailboxes(list);
         if (list.length > 0) {
           navigate(`/dashboard/${list[0].id}`, { replace: true });
@@ -23,10 +24,10 @@ export default function DashboardPage() {
   if (mailboxes === null) {
     return (
       <div className="flex h-screen">
-        <div className="w-64 border-r p-4 space-y-3">
-          <Skeleton className="h-8 w-full" />
-          <Skeleton className="h-8 w-full" />
-          <Skeleton className="h-8 w-full" />
+        <div className="w-64 bg-sidebar p-4 space-y-3">
+          <Skeleton className="h-10 w-full bg-sidebar-accent" />
+          <Skeleton className="h-8 w-full bg-sidebar-accent" />
+          <Skeleton className="h-8 w-full bg-sidebar-accent" />
         </div>
         <div className="flex-1 p-6 space-y-4">
           <Skeleton className="h-6 w-48" />
@@ -37,7 +38,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (mailboxes.length === 0) {
+  if (mailboxes?.length === 0) {
     return (
       <div className="flex h-screen">
         <Sidebar onCompose={() => {}} />

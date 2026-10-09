@@ -45,7 +45,7 @@ export default function ChangePasswordDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <p className="text-sm text-destructive bg-destructive/10 p-2 rounded">{error}</p>
+            <p className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>
           )}
           <Input
             type="password"

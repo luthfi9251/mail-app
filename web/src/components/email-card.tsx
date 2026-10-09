@@ -23,25 +23,26 @@ export default function EmailCard({
     <Link
       to={`/dashboard/${mailboxId}/${email.id}`}
       className={cn(
-        "group block border-b px-4 py-3 transition-colors hover:bg-accent/50",
-        !email.read && "bg-primary/5",
-        selected && "bg-accent"
+        "group relative block border-b border-border/60 px-4 py-3.5 transition-colors hover:bg-card",
+        email.read ? "bg-transparent" : "bg-card",
+        selected && "bg-accent hover:bg-accent"
       )}
     >
+      {!email.read && <span className="absolute left-1.5 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-primary" />}
       <div className="flex items-start gap-3">
-        <Avatar className="h-8 w-8 shrink-0 mt-0.5">
+        <Avatar className="h-9 w-9 shrink-0">
           <AvatarFallback>{initials}</AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <span className={cn("text-sm truncate", !email.read && "font-semibold")}>
+            <span className={cn("text-[13px] truncate", email.read ? "text-muted-foreground" : "font-semibold text-foreground")}>
               {email.direction === "outbound" ? `To: ${email.to}` : email.from}
             </span>
             <span className="text-xs text-muted-foreground shrink-0">
               {formatDate(email.createdAt)}
             </span>
           </div>
-          <p className={cn("text-sm truncate mt-0.5", !email.read && "font-medium")}>
+          <p className={cn("text-sm truncate mt-0.5", email.read ? "text-foreground/80" : "font-semibold text-foreground")}>
             {email.subject}
           </p>
           <p className="text-xs text-muted-foreground truncate mt-0.5">
@@ -54,13 +55,13 @@ export default function EmailCard({
             e.stopPropagation();
             onStarToggle?.();
           }}
-          className="shrink-0 mt-1"
+          className="shrink-0 mt-1 rounded p-0.5 transition-colors hover:bg-muted"
         >
           <Star
             className={cn(
               "h-4 w-4",
               email.starred
-                ? "fill-yellow-400 text-yellow-400"
+                ? "fill-amber-400 text-amber-400"
                 : "text-muted-foreground opacity-0 group-hover:opacity-100"
             )}
           />

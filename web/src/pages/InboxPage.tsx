@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Sidebar from "../components/sidebar";
+import MobileDrawer from "../components/mobile-drawer";
 import EmailList from "../components/email-list";
 import ThreadView from "../components/thread-view";
 import ComposeDialog from "../components/compose-dialog";
@@ -14,26 +15,18 @@ export default function InboxPage() {
   if (!mailboxId) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-dvh overflow-hidden">
       <div className="hidden lg:flex">
         <Sidebar onCompose={() => setComposeOpen(true)} />
       </div>
 
-      <div className={`fixed inset-0 z-40 lg:hidden ${sidebarOpen ? "block" : "hidden"}`}>
-        <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-        <div className="relative w-64 h-full">
-          <Sidebar
-            onCompose={() => { setComposeOpen(true); setSidebarOpen(false); }}
-            onClose={() => setSidebarOpen(false)}
-          />
-        </div>
-      </div>
+      <MobileDrawer open={sidebarOpen} onClose={() => setSidebarOpen(false)} onCompose={() => setComposeOpen(true)} />
 
-      <div className={`lg:flex ${emailId ? "hidden lg:flex" : "flex flex-1"}`}>
+      <div className={emailId ? "hidden lg:flex lg:shrink-0" : "flex flex-1 min-w-0 lg:flex-none lg:shrink-0"}>
         <EmailList mailboxId={mailboxId} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
       </div>
 
-      <div className={`flex-1 flex flex-col h-full min-w-0 overflow-hidden ${emailId ? "flex" : "hidden lg:flex"}`}>
+      <div className={`flex-1 flex flex-col h-full min-w-0 overflow-hidden bg-card ${emailId ? "flex" : "hidden lg:flex"}`}>
         {emailId ? (
           <ThreadView mailboxId={mailboxId} emailId={emailId} />
         ) : (

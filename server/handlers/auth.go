@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -60,6 +61,71 @@ func Login(c *gin.Context) {
 			"role":  user.Role,
 		},
 	})
+}
+
+func SetupStatus(c *gin.Context) {
+	count, err := database.GetCollection("users").CountDocuments(c.Request.Context(), bson.M{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check setup status"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"needsSetup": count == 0})
+}
+
+func Setup(c *gin.Context) {
+	var req struct {
+		Email    string `json:"email" binding:"required"`
+		Name     string `json:"name" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email, name and password required"})
+		return
+	}
+
+	col := database.GetCollection("users")
+	count, err := col.CountDocuments(c.Request.Context(), bson.M{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check setup status"})
+		return
+	}
+	if count > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "setup already completed"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	// ponytail: count+insert race can create two admins on concurrent first setups; unique email index blocks same email, use a transaction if that matters.
+	result, err := col.InsertOne(c.Request.Context(), models.User{
+		Email:     req.Email,
+		Name:      req.Name,
+		Password:  string(hash),
+		Role:      "admin",
+		CreatedAt: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "email already exists"})
+		return
+	}
+
+	// Use the admin's own address if it is on the mailbox domain, otherwise
+	// fall back to <local-part>@<mailbox domain>.
+	address := req.Email
+	parts := strings.SplitN(req.Email, "@", 2)
+	if parts[0] != "" && (len(parts) != 2 || parts[1] != mailboxDomain()) {
+		address = parts[0] + "@" + mailboxDomain()
+	}
+	if err := createOwnedMailbox(c.Request.Context(), result.InsertedID.(bson.ObjectID), address); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "admin created but failed to create mailbox"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"success": true})
 }
 
 func Logout(c *gin.Context) {

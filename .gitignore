@@ -4,3 +4,10 @@ react-spa/src/assets/
 react-spa/public/icons.svg
 react-spa/README.md
 react-spa/.oxlintrc.json
+
+.env
+
+# Secrets
+.env
+*.env
+!.env.example
