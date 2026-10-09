@@ -6,9 +6,9 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import LogoutButton from "./logout-button";
-import { Mail, Plus, Settings } from "lucide-react";
+import { Mail, Plus, Settings, X } from "lucide-react";
 
-export default function Sidebar({ onCompose }: { onCompose: () => void }) {
+export default function Sidebar({ onCompose, onClose }: { onCompose: () => void; onClose?: () => void }) {
   const { mailboxId } = useParams();
   const navigate = useNavigate();
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -21,11 +21,16 @@ export default function Sidebar({ onCompose }: { onCompose: () => void }) {
 
   return (
     <div className="w-64 min-w-[256px] max-w-[256px] border-r bg-card flex flex-col h-screen">
-      <div className="p-4">
+      <div className="p-4 flex items-center justify-between">
         <Link to="/dashboard" className="flex items-center gap-2 font-bold text-lg">
           <Mail className="h-5 w-5 text-primary" />
           Email App
         </Link>
+        {onClose && (
+          <Button variant="ghost" size="icon" className="lg:hidden" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </Button>
+        )}
       </div>
 
       <div className="px-4 mb-2">

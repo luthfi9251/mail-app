@@ -9,14 +9,31 @@ import EmptyState from "../components/empty-state";
 export default function InboxPage() {
   const { mailboxId, emailId } = useParams();
   const [composeOpen, setComposeOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (!mailboxId) return null;
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar onCompose={() => setComposeOpen(true)} />
-      <EmailList mailboxId={mailboxId} />
-      <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
+      <div className="hidden lg:flex">
+        <Sidebar onCompose={() => setComposeOpen(true)} />
+      </div>
+
+      <div className={`fixed inset-0 z-40 lg:hidden ${sidebarOpen ? "block" : "hidden"}`}>
+        <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
+        <div className="relative w-64 h-full">
+          <Sidebar
+            onCompose={() => { setComposeOpen(true); setSidebarOpen(false); }}
+            onClose={() => setSidebarOpen(false)}
+          />
+        </div>
+      </div>
+
+      <div className={`lg:flex ${emailId ? "hidden lg:flex" : "flex flex-1"}`}>
+        <EmailList mailboxId={mailboxId} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+      </div>
+
+      <div className={`flex-1 flex flex-col h-full min-w-0 overflow-hidden ${emailId ? "flex" : "hidden lg:flex"}`}>
         {emailId ? (
           <ThreadView mailboxId={mailboxId} emailId={emailId} />
         ) : (
@@ -26,6 +43,7 @@ export default function InboxPage() {
           />
         )}
       </div>
+
       <ComposeDialog
         mailboxId={mailboxId}
         open={composeOpen}

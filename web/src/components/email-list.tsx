@@ -5,12 +5,12 @@ import EmailCard from "./email-card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
-import { Search, RefreshCw } from "lucide-react";
+import { Search, RefreshCw, Menu } from "lucide-react";
 import { cn } from "../lib/utils";
 
 type Tab = "inbox" | "sent" | "starred";
 
-export default function EmailList({ mailboxId }: { mailboxId: string }) {
+export default function EmailList({ mailboxId, onToggleSidebar }: { mailboxId: string; onToggleSidebar?: () => void }) {
   const { emailId } = useParams();
   const [emails, setEmails] = useState<EmailItem[]>([]);
   const [page, setPage] = useState(1);
@@ -105,8 +105,14 @@ export default function EmailList({ mailboxId }: { mailboxId: string }) {
   ];
 
   return (
-    <div className="w-[420px] min-w-[420px] max-w-[420px] border-r flex flex-col h-full bg-card">
+    <div className="w-full lg:w-[420px] lg:min-w-[420px] lg:max-w-[420px] lg:shrink-0 border-r flex flex-col h-full bg-card">
       <div className="p-4 border-b space-y-3">
+        <div className="flex items-center gap-2 lg:hidden">
+          <Button variant="ghost" size="icon" onClick={onToggleSidebar}>
+            <Menu className="h-5 w-5" />
+          </Button>
+          <span className="font-semibold">Email App</span>
+        </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input

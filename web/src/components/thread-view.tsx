@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, type EmailItem, type Attachment } from "../lib/api";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
@@ -7,7 +8,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import ComposeDialog from "./compose-dialog";
 import { Skeleton } from "./ui/skeleton";
-import { ArrowUp, Paperclip, Reply } from "lucide-react";
+import { ArrowLeft, ArrowUp, Paperclip, Reply } from "lucide-react";
 
 export default function ThreadView({
   mailboxId,
@@ -19,6 +20,7 @@ export default function ThreadView({
   const [emails, setEmails] = useState<EmailItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyOpen, setReplyOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     setLoading(true);
@@ -61,6 +63,15 @@ export default function ThreadView({
     <div className="flex-1 flex flex-col h-full">
       <ScrollArea className="flex-1">
         <div className="p-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="lg:hidden mb-4 -ml-2 gap-1"
+            onClick={() => navigate(`/dashboard/${mailboxId}`)}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
           <h2 className="text-xl font-semibold mb-1">{emails[0].subject}</h2>
           <p className="text-sm text-muted-foreground mb-6">
             {emails.length} message{emails.length > 1 ? "s" : ""}
