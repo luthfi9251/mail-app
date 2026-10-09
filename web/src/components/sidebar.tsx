@@ -20,7 +20,7 @@ export default function Sidebar({ onCompose }: { onCompose: () => void }) {
   }, []);
 
   return (
-    <div className="w-64 shrink-0 border-r bg-card flex flex-col h-screen">
+    <div className="w-64 min-w-[256px] max-w-[256px] border-r bg-card flex flex-col h-screen">
       <div className="p-4">
         <Link to="/dashboard" className="flex items-center gap-2 font-bold text-lg">
           <Mail className="h-5 w-5 text-primary" />
@@ -28,7 +28,7 @@ export default function Sidebar({ onCompose }: { onCompose: () => void }) {
         </Link>
       </div>
 
-      <div className="px-3 mb-2">
+      <div className="px-4 mb-2">
         <Button onClick={onCompose} className="w-full gap-2">
           <Plus className="h-4 w-4" />
           Compose
@@ -38,12 +38,12 @@ export default function Sidebar({ onCompose }: { onCompose: () => void }) {
       <Separator />
 
       <ScrollArea className="flex-1 px-3 py-2">
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {mailboxes.map((mb) => (
             <Link
               key={mb.id}
               to={`/dashboard/${mb.id}`}
-              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors ${
                 mailboxId === mb.id
                   ? "bg-accent text-accent-foreground font-medium"
                   : "hover:bg-accent/50"
@@ -58,7 +58,7 @@ export default function Sidebar({ onCompose }: { onCompose: () => void }) {
 
       <Separator />
 
-      <div className="p-3 space-y-2">
+      <div className="p-4 space-y-2">
         {user?.role === "admin" && (
           <Link
             to="/admin"
@@ -69,7 +69,7 @@ export default function Sidebar({ onCompose }: { onCompose: () => void }) {
           </Link>
         )}
         <div className="flex items-center gap-3 px-3 py-2">
-          <Avatar className="h-8 w-8">
+          <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback>
               {user?.name?.charAt(0)?.toUpperCase() || "?"}
             </AvatarFallback>

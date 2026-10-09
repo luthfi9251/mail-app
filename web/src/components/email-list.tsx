@@ -105,8 +105,8 @@ export default function EmailList({ mailboxId }: { mailboxId: string }) {
   ];
 
   return (
-    <div className="w-96 shrink-0 border-r flex flex-col h-full bg-card">
-      <div className="p-3 border-b space-y-2">
+    <div className="w-[420px] min-w-[420px] max-w-[420px] border-r flex flex-col h-full bg-card">
+      <div className="p-4 border-b space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -123,10 +123,10 @@ export default function EmailList({ mailboxId }: { mailboxId: string }) {
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 className={cn(
-                  "px-3 py-1 text-sm rounded-md transition-colors",
+                  "px-3 py-1.5 text-sm rounded-md transition-colors font-medium",
                   tab === t.key
                     ? "bg-primary text-primary-foreground"
-                    : "hover:bg-accent"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
                 )}
               >
                 {t.label}

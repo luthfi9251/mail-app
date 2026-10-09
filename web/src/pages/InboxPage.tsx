@@ -13,10 +13,10 @@ export default function InboxPage() {
   if (!mailboxId) return null;
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar onCompose={() => setComposeOpen(true)} />
       <EmailList mailboxId={mailboxId} />
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
         {emailId ? (
           <ThreadView mailboxId={mailboxId} emailId={emailId} />
         ) : (
