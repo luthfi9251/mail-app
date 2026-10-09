@@ -86,6 +86,46 @@ func Me(c *gin.Context) {
 	})
 }
 
+func ChangePassword(c *gin.Context) {
+	var req struct {
+		CurrentPassword string `json:"currentPassword" binding:"required"`
+		NewPassword     string `json:"newPassword" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currentPassword and newPassword required"})
+		return
+	}
+
+	userID, _ := c.Get("userId")
+	col := database.GetCollection("users")
+
+	var user models.User
+	err := col.FindOne(c.Request.Context(), bson.M{"_id": MustObjectID(userID.(string))}).Decode(&user)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "current password is incorrect"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	_, err = col.UpdateByID(c.Request.Context(), user.ID, bson.M{"$set": bson.M{"password": string(hash)}})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 func MustObjectID(hex string) bson.ObjectID {
 	id, _ := bson.ObjectIDFromHex(hex)
 	return id

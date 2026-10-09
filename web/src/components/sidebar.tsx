@@ -6,13 +6,15 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import LogoutButton from "./logout-button";
-import { Mail, Plus, Settings, X } from "lucide-react";
+import ChangePasswordDialog from "./change-password-dialog";
+import { Mail, Plus, Settings, X, KeyRound } from "lucide-react";
 
 export default function Sidebar({ onCompose, onClose }: { onCompose: () => void; onClose?: () => void }) {
   const { mailboxId } = useParams();
   const navigate = useNavigate();
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   useEffect(() => {
     api<Mailbox[]>("/mailboxes").then(setMailboxes).catch(() => navigate("/login"));
@@ -84,8 +86,16 @@ export default function Sidebar({ onCompose, onClose }: { onCompose: () => void;
             <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
         </div>
+        <button
+          onClick={() => setPasswordOpen(true)}
+          className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+        >
+          <KeyRound className="h-4 w-4" />
+          Change Password
+        </button>
         <LogoutButton />
       </div>
+      <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
     </div>
   );
 }

@@ -60,6 +60,7 @@ func main() {
 		auth.Use(middleware.AuthRequired())
 		{
 			auth.GET("/auth/me", handlers.Me)
+			auth.POST("/auth/change-password", handlers.ChangePassword)
 			auth.GET("/mailboxes", handlers.ListMailboxes)
 			auth.GET("/mailboxes/:id", handlers.GetMailbox)
 			auth.GET("/emails", handlers.ListEmails)
