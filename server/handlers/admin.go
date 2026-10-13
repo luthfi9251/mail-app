@@ -34,7 +34,8 @@ func isSelf(c *gin.Context, id bson.ObjectID) bool {
 	return userID == id.Hex()
 }
 
-// createOwnedMailbox inserts a mailbox and assigns it to the user as owner.
+// createOwnedMailbox inserts a mailbox, assigns it to the user as owner and
+// gives every admin access to it.
 func createOwnedMailbox(ctx context.Context, userID bson.ObjectID, address string) error {
 	now := time.Now().UnixMilli()
 	mb, err := database.GetCollection("mailboxes").InsertOne(ctx, models.Mailbox{
@@ -44,13 +45,91 @@ func createOwnedMailbox(ctx context.Context, userID bson.ObjectID, address strin
 	if err != nil {
 		return err
 	}
+	mailboxID := mb.InsertedID.(bson.ObjectID)
 	_, err = database.GetCollection("usermailboxes").InsertOne(ctx, models.UserMailbox{
 		UserID:    userID,
-		MailboxID: mb.InsertedID.(bson.ObjectID),
+		MailboxID: mailboxID,
 		Role:      "owner",
 		CreatedAt: now,
 	})
+	if err != nil {
+		return err
+	}
+	return assignAdminsToMailbox(ctx, mailboxID)
+}
+
+// grantMemberAccess gives every user access to every mailbox as a member,
+// skipping pairs that already have an assignment (whatever its role).
+func grantMemberAccess(ctx context.Context, userIDs, mailboxIDs []bson.ObjectID) error {
+	if len(userIDs) == 0 || len(mailboxIDs) == 0 {
+		return nil
+	}
+	col := database.GetCollection("usermailboxes")
+	cursor, err := col.Find(ctx, bson.M{"userId": bson.M{"$in": userIDs}, "mailboxId": bson.M{"$in": mailboxIDs}})
+	if err != nil {
+		return err
+	}
+	var existing []models.UserMailbox
+	if err := cursor.All(ctx, &existing); err != nil {
+		return err
+	}
+	type pair struct{ user, mailbox bson.ObjectID }
+	have := make(map[pair]bool, len(existing))
+	for _, a := range existing {
+		have[pair{a.UserID, a.MailboxID}] = true
+	}
+
+	now := time.Now().UnixMilli()
+	var docs []any
+	for _, u := range userIDs {
+		for _, m := range mailboxIDs {
+			if !have[pair{u, m}] {
+				docs = append(docs, models.UserMailbox{UserID: u, MailboxID: m, Role: "member", CreatedAt: now})
+			}
+		}
+	}
+	if len(docs) == 0 {
+		return nil
+	}
+	_, err = col.InsertMany(ctx, docs)
 	return err
+}
+
+// findIDs returns the _id of every document in the collection matching filter.
+func findIDs(ctx context.Context, collection string, filter bson.M) ([]bson.ObjectID, error) {
+	cursor, err := database.GetCollection(collection).Find(ctx, filter, options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return nil, err
+	}
+	var docs []struct {
+		ID bson.ObjectID `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	ids := make([]bson.ObjectID, len(docs))
+	for i, d := range docs {
+		ids[i] = d.ID
+	}
+	return ids, nil
+}
+
+// assignAllMailboxesToUser gives an admin access to every existing mailbox.
+func assignAllMailboxesToUser(ctx context.Context, userID bson.ObjectID) error {
+	mailboxIDs, err := findIDs(ctx, "mailboxes", bson.M{})
+	if err != nil {
+		return err
+	}
+	return grantMemberAccess(ctx, []bson.ObjectID{userID}, mailboxIDs)
+}
+
+// assignAdminsToMailbox gives every admin access to a new mailbox.
+func assignAdminsToMailbox(ctx context.Context, mailboxID bson.ObjectID) error {
+	adminIDs, err := findIDs(ctx, "users", bson.M{"role": models.RoleAdmin})
+	if err != nil {
+		return err
+	}
+	return grantMemberAccess(ctx, adminIDs, []bson.ObjectID{mailboxID})
 }
 
 func GetAdminConfig(c *gin.Context) {
@@ -142,6 +221,12 @@ func CreateUser(c *gin.Context) {
 	if len(parts) == 2 && parts[1] == config.MailboxDomain {
 		createOwnedMailbox(c.Request.Context(), userID, req.Email)
 	}
+	if req.Role == models.RoleAdmin {
+		if err := assignAllMailboxesToUser(c.Request.Context(), userID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "user created but failed to assign mailboxes"})
+			return
+		}
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"success": true})
 }
@@ -198,6 +283,13 @@ func SetUserRole(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
+	// A new admin gets every mailbox; revoking admin keeps the assignments.
+	if req.Role == models.RoleAdmin {
+		if err := assignAllMailboxesToUser(c.Request.Context(), id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "role updated but failed to assign mailboxes"})
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -247,12 +339,16 @@ func CreateMailbox(c *gin.Context) {
 	}
 
 	col := database.GetCollection("mailboxes")
-	_, err := col.InsertOne(c.Request.Context(), models.Mailbox{
+	res, err := col.InsertOne(c.Request.Context(), models.Mailbox{
 		EmailAddress: localPart + "@" + config.MailboxDomain,
 		CreatedAt:    time.Now().UnixMilli(),
 	})
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "mailbox already exists"})
+		return
+	}
+	if err := assignAdminsToMailbox(c.Request.Context(), res.InsertedID.(bson.ObjectID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "mailbox created but failed to assign admins"})
 		return
 	}
 

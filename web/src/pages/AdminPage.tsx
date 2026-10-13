@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { api, type User } from "../lib/api";
 import Sidebar from "../components/sidebar";
 import MobileDrawer from "../components/mobile-drawer";
 import AdminUsers from "../components/admin-users";
@@ -6,11 +8,33 @@ import AdminMailboxes from "../components/admin-mailboxes";
 import ComposeDialog from "../components/compose-dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
-import { Menu, Users, Inbox } from "lucide-react";
+import { Loader2, Menu, Users, Inbox } from "lucide-react";
 
 export default function AdminPage() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const navigate = useNavigate();
+
+  // The server enforces admin access on /admin/*; this check only keeps
+  // non-admins from seeing the page and firing requests that will be rejected.
+  useEffect(() => {
+    api<User>("/auth/me")
+      .then(setUser)
+      .catch(() => navigate("/login", { replace: true }));
+  }, []);
+
+  if (user === null) {
+    return (
+      <div className="flex h-dvh items-center justify-center text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    );
+  }
+
+  if (user.role !== "admin") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <div className="flex h-dvh overflow-hidden">
