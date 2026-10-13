@@ -42,7 +42,8 @@ Browser (React SPA) ──► Go API (Gin) ──► MongoDB
 
 - [Go](https://go.dev/dl/) (the version in `server/go.mod`)
 - [Node.js](https://nodejs.org/) 20+ and npm
-- [Docker](https://docs.docker.com/get-docker/) (optional, for a local MongoDB) or any MongoDB 6+ instance
+- A MongoDB 6+ instance
+- [Docker](https://docs.docker.com/get-docker/) (optional, to run the app in a container)
 - A [Resend](https://resend.com) account and a domain you control
 
 ## Setup
@@ -62,8 +63,7 @@ Everything below is done in the [Resend Email Dashboard](https://resend.com/over
 ```bash
 git clone <your-repo-url> email-app
 cd email-app
-cp .env.example .env                 # MongoDB credentials for docker compose
-cp server/.env.example server/.env   # server config
+cp server/.env.example server/.env
 ```
 
 Edit `server/.env`:
@@ -84,15 +84,9 @@ Edit `server/.env`:
 
 For local development over `http://localhost`, set `COOKIE_SECURE=false`.
 
-### 3. Start MongoDB
+### 3. MongoDB
 
-The included `docker-compose.yml` starts a local MongoDB, bound to `127.0.0.1` only, using the credentials from the root `.env`. Use the same username and password in `MONGODB_URI`:
-
-```bash
-docker compose up -d
-```
-
-Already have MongoDB? Skip this and point `MONGODB_URI` at it.
+Point `MONGODB_URI` at your MongoDB instance. Keep it reachable only from the machines that need it, never from the internet.
 
 ### 4. Install and run
 
@@ -115,6 +109,19 @@ From the **Admin** page you can then create more users and mailboxes. Creating a
 Send a message to your new address from another account, press the refresh icon, and it should appear.
 
 ## Production
+
+### Docker (recommended)
+
+The multi-stage `Dockerfile` builds the frontend and the Go binary into a small distroless image that runs as non-root. `docker-compose.yml` starts **only the app**; it uses your existing MongoDB.
+
+```bash
+cp docker.env.example docker.env   # fill in MONGODB_URI, RESEND_API_KEY, JWT_SECRET, MAILBOX_DOMAIN
+docker compose up -d --build
+```
+
+The app is published on port **30213**. Inside the container `localhost` is the container itself, so `MONGODB_URI` must use an address the container can reach (e.g. the host IP). Point your HTTPS reverse proxy or tunnel at `http://<host>:30213`.
+
+### Without Docker
 
 ```bash
 make build        # builds web/dist and the server/email-app binary
@@ -174,4 +181,4 @@ web/      React + Vite + Tailwind frontend
 - **Cannot send / "failed to send email":** the domain is not verified in Resend, or `RESEND_API_KEY` is wrong.
 - **No incoming mail:** check the MX records and that receiving is enabled for the domain in the Resend dashboard, then press refresh.
 - **Images in emails do not load:** some senders' image hosts block embedding on other sites (`Cross-Origin-Resource-Policy`). This is a limitation of the sender's host, not a bug.
-- **Server cannot connect to the database:** confirm MongoDB is running and `MONGODB_URI` is correct (`docker compose ps`).
+- **Server cannot connect to the database:** confirm MongoDB is running and `MONGODB_URI` is correct. In Docker, check `docker logs email-app`.

@@ -1,0 +1,12 @@
+# Keep secrets, local builds and dependencies out of the build context.
+.git
+.env
+*.env
+**/.env
+!**/*.env.example
+.superpowers
+docs
+**/node_modules
+web/dist
+server/email-app
+**/*_test.go

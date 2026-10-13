@@ -1,15 +1,16 @@
+# Runs only the app. MongoDB is the existing shared instance, configured
+# through MONGODB_URI in docker.env (see docker.env.example).
 services:
-  mongodb:
-    image: mongo:7
-    container_name: email-app-mongodb
-    # Bound to localhost only: the database must never be reachable from the network.
+  app:
+    build: .
+    image: email-app:latest
+    container_name: email-app
+    env_file: docker.env
     ports:
-      - "127.0.0.1:27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME in .env}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
-
-volumes:
-  mongodb_data:
+      - "30213:8080"
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
