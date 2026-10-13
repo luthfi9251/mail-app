@@ -176,8 +176,13 @@ func Setup(c *gin.Context) {
 	if parts[0] != "" && (len(parts) != 2 || parts[1] != config.MailboxDomain) {
 		address = parts[0] + "@" + config.MailboxDomain
 	}
-	if err := createOwnedMailbox(c.Request.Context(), result.InsertedID.(bson.ObjectID), address); err != nil {
+	adminID := result.InsertedID.(bson.ObjectID)
+	if err := createOwnedMailbox(c.Request.Context(), adminID, address); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "admin created but failed to create mailbox"})
+		return
+	}
+	if err := assignAllMailboxesToUser(c.Request.Context(), adminID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "admin created but failed to assign mailboxes"})
 		return
 	}
 

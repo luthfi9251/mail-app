@@ -89,7 +89,8 @@ export default function AdminUsers() {
           method: "PATCH",
           body: JSON.stringify({ role }),
         });
-        setUsers((prev) => (prev ?? []).map((x) => (x.id === u.id ? { ...x, role } : x)));
+        // Promotion assigns every mailbox, so refetch to update mailboxCount.
+        api<AdminUser[]>("/admin/users").then((list) => setUsers(list ?? []));
       },
     });
   }
